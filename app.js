@@ -1,6 +1,8 @@
 import * as db from './js/db.js';
-import { resize, photoUrl } from './js/images.js';
+import { resize, photoUrl, forgetPhotoUrl } from './js/images.js';
 import { speechSupported, createDictation } from './js/speech.js';
+import { cameraSupported, startCamera, stopCamera, isLive, capture, cameraErrorMessage } from './js/camera.js';
+import { COLORS, TOOLS, render as renderAnnotations, attachEditor } from './js/annotate.js';
 
 const $view = document.getElementById('view');
 const $title = document.getElementById('title');
@@ -51,7 +53,7 @@ function pickFiles(input) {
 }
 
 async function savePhoto(file, projectId, extra = {}) {
-  const blob = await resize(file);
+  const blob = await resize(file, 2000);
   const photo = { id: db.uid(), projectId, blob, caption: '', createdAt: Date.now(), ...extra };
   await db.put('photos', photo);
   return photo;
@@ -66,7 +68,9 @@ async function route() {
   window.scrollTo(0, 0);
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   try {
-    if (parts[0] === 'p' && parts[1]) cleanup = await viewProject(parts[1]);
+    if (parts[0] === 'p' && parts[1] && parts[2] === 'camera') cleanup = await viewCamera(parts[1]);
+    else if (parts[0] === 'p' && parts[1]) cleanup = await viewProject(parts[1]);
+    else if (parts[0] === 'photo' && parts[1] && parts[2] === 'annotate') cleanup = await viewAnnotate(parts[1]);
     else if (parts[0] === 'photo' && parts[1]) cleanup = await viewPhoto(parts[1]);
     else if (parts[0] === 'w' && parts[1] && parts[2] === 'checklist') cleanup = await viewChecklist(parts[1]);
     else if (parts[0] === 'w' && parts[1]) cleanup = await viewWalkthrough(parts[1]);
@@ -166,7 +170,9 @@ async function viewProject(id) {
     for (const f of await pickFiles(input)) await savePhoto(f, id);
     route();
   };
-  $view.querySelector('#take').onclick = addFrom($camera);
+  $view.querySelector('#take').onclick = cameraSupported
+    ? () => { location.hash = `#/p/${id}/camera`; }
+    : addFrom($camera);
   $view.querySelector('#import').onclick = addFrom($gallery);
   $view.querySelector('#addr').onchange = async (e) => {
     project.address = e.target.value.trim();
@@ -189,8 +195,11 @@ async function viewPhoto(id) {
     <div class="card" style="margin-top:12px">
       <label for="cap" style="margin-top:0">Légende</label>
       <textarea id="cap" placeholder="Décrivez la photo (vous pouvez dicter avec le micro du clavier)">${esc(photo.caption)}</textarea>
-      <p class="muted">${fmtDate(photo.createdAt)}</p>
-      <button id="del" class="btn danger block">Supprimer la photo</button>
+      <p class="muted">${fmtDate(photo.createdAt)}${photo.annotations?.length ? ' · annotée' : ''}</p>
+      <div class="stack">
+        <a class="btn primary block" href="#/photo/${id}/annotate">✏️ Annoter</a>
+        <button id="del" class="btn danger block">Supprimer la photo</button>
+      </div>
     </div>`;
   $view.querySelector('#cap').onchange = async (e) => {
     photo.caption = e.target.value.trim();
@@ -201,6 +210,142 @@ async function viewPhoto(id) {
     await db.del('photos', id);
     location.hash = `#/p/${photo.projectId}`;
   };
+}
+
+// ---------- Appareil photo intégré ----------
+// Affiche l'aperçu en direct dans `container`. take() prend la photo
+// instantanément ; si l'aperçu est impossible, on retombe sur l'appareil
+// photo d'iOS (avec son écran « Utiliser la photo »).
+function mountCamera(container) {
+  container.innerHTML = `
+    <div class="cam">
+      <video playsinline muted></video>
+      <div class="flash"></div>
+      <p class="cam-msg muted"></p>
+    </div>`;
+  const video = container.querySelector('video');
+  const flash = container.querySelector('.flash');
+  const msg = container.querySelector('.cam-msg');
+  let stream = null;
+  let stopped = false;
+
+  async function open() {
+    if (!cameraSupported || stopped) { msg.textContent = 'Aperçu indisponible : le bouton photo ouvrira l\'appareil photo de l\'iPhone.'; return; }
+    try {
+      msg.textContent = '';
+      stream = await startCamera(video);
+      if (stopped) stopCamera(stream);
+    } catch (err) {
+      stream = null;
+      msg.textContent = cameraErrorMessage(err) + ' Le bouton photo ouvrira l\'appareil photo de l\'iPhone.';
+    }
+  }
+
+  // iOS coupe la caméra quand l'app passe en arrière-plan : on la relance au retour.
+  const onVisible = () => { if (document.visibilityState === 'visible' && !isLive(stream)) open(); };
+  document.addEventListener('visibilitychange', onVisible);
+  open();
+
+  return {
+    async take() {
+      if (isLive(stream) && video.videoWidth) {
+        flash.classList.remove('on');
+        void flash.offsetWidth; // relance l'animation
+        flash.classList.add('on');
+        return [await capture(video)];
+      }
+      return pickFiles($camera);
+    },
+    stop() {
+      stopped = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      stopCamera(stream);
+    },
+  };
+}
+
+async function viewCamera(projectId) {
+  const project = await db.get('projects', projectId);
+  if (!project) { location.hash = '#/'; return; }
+  setHeader('Photos', `#/p/${projectId}`);
+  $view.innerHTML = `
+    <div id="cam"></div>
+    <div class="card controls">
+      <span id="count" class="muted" style="flex:1">0 photo</span>
+      <button id="shutter" class="big-shutter" aria-label="Prendre une photo"></button>
+      <a class="btn" style="flex:1" href="#/p/${projectId}">Terminé</a>
+    </div>
+    <div id="last" class="grid"></div>`;
+  const cam = mountCamera($view.querySelector('#cam'));
+  let n = 0;
+  $view.querySelector('#shutter').onclick = async () => {
+    for (const f of await cam.take()) {
+      const p = await savePhoto(f, projectId);
+      n++;
+      $view.querySelector('#count').textContent = `${n} photo${n > 1 ? 's' : ''}`;
+      $view.querySelector('#last').insertAdjacentHTML('afterbegin', `<a href="#/photo/${p.id}"><img src="${photoUrl(p)}" alt=""></a>`);
+    }
+  };
+  return () => cam.stop();
+}
+
+// ---------- Annotation ----------
+async function viewAnnotate(id) {
+  const photo = await db.get('photos', id);
+  if (!photo) { history.back(); return; }
+  setHeader('Annoter', `#/photo/${id}`);
+  const original = photo.original || photo.blob;
+  const image = new Image();
+  const url = URL.createObjectURL(original);
+  await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; });
+
+  const state = { tool: 'arrow', color: COLORS[0], shapes: structuredClone(photo.annotations || []) };
+  $view.innerHTML = `
+    <div class="annot-tools no-print">
+      <div class="seg">${TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.title}" aria-label="${t.title}">${t.label}</button>`).join('')}</div>
+      <div class="seg">${COLORS.map((c) => `<button data-color="${c}" aria-label="Couleur ${c}"><span class="swatch" style="background:${c}"></span></button>`).join('')}</div>
+    </div>
+    <canvas id="canvas" class="annot-canvas"></canvas>
+    <div class="row" style="margin-top:10px">
+      <button id="undo" class="btn">↶ Annuler</button>
+      <button id="clear" class="btn">Tout effacer</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <a class="btn" href="#/photo/${id}">Abandonner</a>
+      <button id="save" class="btn primary">Enregistrer</button>
+    </div>`;
+
+  const canvas = $view.querySelector('#canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const redraw = () => renderAnnotations(canvas, image, state.shapes);
+  const syncToolbar = () => {
+    $view.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === state.tool));
+    $view.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('on', b.dataset.color === state.color));
+    $view.querySelector('#undo').disabled = !state.shapes.length;
+  };
+  redraw();
+  syncToolbar();
+  attachEditor(canvas, image, state, syncToolbar);
+
+  $view.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => { state.tool = b.dataset.tool; syncToolbar(); }; });
+  $view.querySelectorAll('[data-color]').forEach((b) => { b.onclick = () => { state.color = b.dataset.color; syncToolbar(); }; });
+  $view.querySelector('#undo').onclick = () => { state.shapes.pop(); redraw(); syncToolbar(); };
+  $view.querySelector('#clear').onclick = () => {
+    if (state.shapes.length && confirm('Effacer toutes les annotations ?')) { state.shapes = []; redraw(); syncToolbar(); }
+  };
+  $view.querySelector('#save').onclick = async () => {
+    // La photo d'origine est gardée à part pour pouvoir modifier les annotations plus tard.
+    photo.original = original;
+    photo.annotations = state.shapes;
+    photo.blob = state.shapes.length
+      ? await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+      : original;
+    await db.put('photos', photo);
+    forgetPhotoUrl(id);
+    location.hash = `#/photo/${id}`;
+  };
+  return () => URL.revokeObjectURL(url);
 }
 
 // ---------- Visite commentée ----------
@@ -257,9 +402,10 @@ async function viewRecording(walk) {
     <div id="err"></div>
     ${speechSupported ? '' : `<div class="card notice">La dictée automatique n'est pas disponible dans ce navigateur.
       Tapez vos notes ci-dessous ou utilisez le <strong>micro du clavier</strong> de l'iPhone.</div>`}
+    <div id="cam"></div>
     <div class="card controls no-print">
       <button id="toggle" class="btn primary">▶︎ Démarrer</button>
-      <button id="shutter" class="big-shutter" aria-label="Prendre une photo">📷</button>
+      <button id="shutter" class="big-shutter" aria-label="Prendre une photo"></button>
       <button id="finish" class="btn">Terminer</button>
     </div>
     <div class="card">
@@ -303,9 +449,10 @@ async function viewRecording(walk) {
   }
 
   $('#toggle').onclick = () => (running ? pause() : start());
+  const cam = mountCamera($('#cam'));
   $('#shutter').onclick = async () => {
     const t = now();
-    const files = await pickFiles($camera);
+    const files = await cam.take();
     for (const f of files) {
       const p = await savePhoto(f, walk.projectId, { walkthroughId: walk.id });
       photos[p.id] = p;
@@ -313,7 +460,7 @@ async function viewRecording(walk) {
     }
     await save();
     render();
-    // Sur iPhone, ouvrir l'appareil photo peut couper la dictée : on la relance.
+    // Si l'appareil photo d'iOS a été ouvert, la dictée a pu être coupée : on la relance.
     if (running && speechSupported) dictation.start();
   };
   $('#add-note').onclick = () => {
@@ -333,7 +480,7 @@ async function viewRecording(walk) {
   };
 
   render();
-  return () => { pause(); };
+  return () => { pause(); cam.stop(); };
 }
 
 async function viewDraft(walk, project) {

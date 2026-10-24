@@ -7,7 +7,8 @@ prenez des photos en marchant sur le chantier, puis l'IA (Claude) rédige le com
 ## Fonctions
 
 - **Chantiers** : création, adresse, suppression.
-- **Photos** : prise avec l'appareil photo ou import depuis la galerie, légende, suppression.
+- **Photos** : l'appareil photo intégré prend les photos à la volée (aperçu en direct, sans écran « Utiliser la photo »). Import depuis la galerie, légende, suppression.
+- **Annotations** : flèche, dessin libre, rectangle, cercle, texte, 6 couleurs, annulation. La photo d'origine est conservée, on peut donc modifier les annotations plus tard. C'est la version annotée qui est envoyée à l'IA et qui apparaît dans les rapports.
 - **Visite commentée IA**
   - Démarrer, mettre en pause, reprendre, terminer. Un chronomètre tourne pendant la visite.
   - Dictée automatique en français quand le navigateur la permet. Sinon, notes écrites ou dictées avec le micro du clavier.
