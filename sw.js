@@ -1,6 +1,6 @@
 // Met l'application en cache pour qu'elle s'ouvre même sans réseau.
 // Augmenter VERSION à chaque mise à jour des fichiers.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `chantier-${VERSION}`;
 const SHELL = [
   './',
@@ -11,6 +11,8 @@ const SHELL = [
   'js/images.js',
   'js/speech.js',
   'js/ai.js',
+  'js/camera.js',
+  'js/annotate.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-180.png',

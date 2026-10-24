@@ -38,3 +38,9 @@ export function photoUrl(photo) {
   if (!urls.has(photo.id)) urls.set(photo.id, URL.createObjectURL(photo.blob));
   return urls.get(photo.id);
 }
+
+// À appeler quand l'image d'une photo change (ex. après annotation).
+export function forgetPhotoUrl(id) {
+  if (urls.has(id)) URL.revokeObjectURL(urls.get(id));
+  urls.delete(id);
+}

@@ -14,6 +14,11 @@ export function createDictation({ lang = 'fr-FR', onFinal, onInterim, onError })
   function start() {
     if (!Recognition) return false;
     wanted = true;
+    // Déjà créée : on la relance seulement si elle s'est arrêtée (sinon start() lève une erreur, ignorée).
+    if (rec) {
+      try { rec.start(); } catch { /* déjà en cours */ }
+      return true;
+    }
     rec = new Recognition();
     rec.lang = lang;
     rec.continuous = true;
