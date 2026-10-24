@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Chantier Photo</title>
+  <meta name="theme-color" content="#1f6feb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Chantier">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button id="back" class="icon-btn" aria-label="Retour" hidden>‹</button>
+    <h1 id="title">Chantiers</h1>
+    <button id="settings-btn" class="icon-btn" aria-label="Réglages">⚙︎</button>
+  </header>
+  <main id="view"></main>
+  <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
+  <input id="gallery-input" type="file" accept="image/*" multiple hidden>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
